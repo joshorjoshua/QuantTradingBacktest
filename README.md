@@ -1,5 +1,7 @@
 # bt Strategy to Kiwoom
 
+This repository accompanies the QuantTrading repository. It allows backtesting for your customized strategy
+
 ## bt Strategy
 
 1. Select Universe
