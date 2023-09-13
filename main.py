@@ -1,4 +1,3 @@
-
 from Backtesting import *
 
 b = Backtesting()
