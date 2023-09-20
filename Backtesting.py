@@ -17,6 +17,7 @@ import cmath
 class Backtesting():
 
     def __init__(self):
+        self.codes = []
         self.universe = {}
         self.universe_close = collections.defaultdict(dict)
 
@@ -38,12 +39,17 @@ class Backtesting():
         self.init()
 
     def init(self):
-        for code in codes:
+
+        sql = "select code from universe"
+        cur = execute_sql("BollingerStrategy", sql)
+        self.codes = [x[0] for x in cur.fetchall()]
+
+        for code in self.codes:
             self.universe[code] = {'code_name': code}
 
         self.get_data()
 
-        for code in codes:
+        for code in self.codes:
             for dt in self.universe[code]['price_df'].index:
                 self.universe_close[dt][code] = self.universe[code]['price_df'].loc[dt, 'close']
 
@@ -94,7 +100,7 @@ class Backtesting():
         # RSI
         rsi = talib.RSI(close)
 
-        # _______________STRATEGY_______________________
+        # _______________STRATEGY___________________
 
         # PSAR strategy
         # 1.
@@ -133,7 +139,7 @@ class Backtesting():
     def run(self):
         while self.testing_date < date.today():
             dt = self.testing_date.strftime("%Y%m%d")
-            sample_code = '000270'
+            sample_code = self.codes[0]
             # skip weekends when market is closed
             if dt not in self.universe[sample_code]['price_df'].index:
                 self.testing_date += timedelta(days=1)
@@ -149,13 +155,13 @@ class Backtesting():
             print("Testing at: " + dt)
 
             # update weight for this date
-            for code in codes:
+            for code in self.codes:
                 if dt not in self.universe[code]['price_df'].index:
                     continue
                 self.alpha(code)
 
             # Buy / Sell
-            for code in codes:
+            for code in self.codes:
                 if dt not in self.universe[code]['price_df'].index:
                     continue
 
@@ -172,7 +178,7 @@ class Backtesting():
                         sold += self.sell(code, current_quantity - optimal_quantity)
 
             # Update Summary
-            for code in codes:
+            for code in self.codes:
                 if code not in self.balance:
                     continue
                 if code not in self.universe_close[dt]:
