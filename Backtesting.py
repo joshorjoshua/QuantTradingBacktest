@@ -25,8 +25,7 @@ class Backtesting():
         self.balance = {}
 
         # Adjust based on market sentiment.
-        self.investment_deposit_ratio = 0.9  # [0, 1]
-        self.investment_ratio = 0.4  # [0, 1]
+        self.investment_ratio = 0.35  # [0, 1]
         self.stop_loss = 0.06
 
         self.start_date = date(1985, 1, 1)  # .strftime('%Y%m%d')
@@ -65,7 +64,7 @@ class Backtesting():
 
         # _____________COMMON INDICATORS_________________
 
-        # simple moving average
+        # Simple Moving Average
         sma = talib.SMA(close, 200)
 
         # Bollinger Bands
@@ -92,56 +91,29 @@ class Backtesting():
         # ADX
         adx = talib.ADX(high, low, close)
 
+        # RSI
+        rsi = talib.RSI(close)
+
         # _______________STRATEGY_______________________
-        """
-        # MACD + Stochastic double-cross strategy
-        # 1. (0.5) Positive macd_hist and stoch_hist
-        # 2. (0.4) Bullish crossover within 2 days (Stochastic must cross before MACD)
-        # 3. (0.05) k < 50
-        # 4. (0.05) Above 200 day m.a.
-
-        # 1.
-        c = macd_hist[dt] > 0 and stoch_hist[dt] > 0
-
-        # 2.
-        c1 = False  # MACD cross-over
-        if str_timedelta(dt, -1) in macd_hist:
-            c1 = macd_hist[dt] > 0 and macd_hist[str_timedelta(dt, -1)] > 0
-
-        c2 = False  # Stochastic cross-over
-        for i in range(2):
-            if c2:
-                break
-            if str_timedelta(dt, -i) not in stoch_hist or str_timedelta(dt, -(i + 1)) not in stoch_hist:
-                continue
-            c2 = c2 or (stoch_hist[str_timedelta(dt, -i)] > 0 > stoch_hist[str_timedelta(dt, -(i + 1))])
-
-        # 3.
-        c3 = k[dt] < 50
-
-        # 4.
-        c4 = close[dt] > sma[dt]
-        """
 
         # PSAR strategy
-        # 1. (0.4) PSAR < close
-        # 2. (0.3) PSAR buy signal
-        # 3. (0.3 if 2) adx > 30
-
         # 1.
         c1 = psar[dt] < close[dt]
 
         # 2.
-        c2 = False  # MACD cross-over
+        c2 = False  # buy signal
         if str_timedelta(dt, -1) in psar:
-            c2 = psar[dt] < close[dt] and psar[str_timedelta(dt, -1)] < close[dt]
+            c2 = c2 or (psar[dt] < close[dt] and psar[str_timedelta(dt, -1)] < close[str_timedelta(dt, -1)])
+
+        c3 = False  # sell signal
+        if str_timedelta(dt, -1) in psar:
+            c3 = c3 or (psar[dt] > close[dt] and psar[str_timedelta(dt, -1)] > close[str_timedelta(dt, -1)])
 
         # 3.
-        c3 = adx[dt] > 30
+        c4 = adx[dt] > 30
 
         # Update weight
-        self.weight[code] = c1 * 0.4 + c2 * 0.3 + (c2 and c3) * 0.3
-
+        self.weight[code] = c1 * 0.6 + c2 * 0.2 - c3 * 0.3 + (c1 and c2 and c4) * 0.2 - ((not c1) and c3 and c4) * 0.3
 
     def get_data(self):
         for idx, code in enumerate(self.universe.keys()):
@@ -263,7 +235,13 @@ class Backtesting():
 
     def buy_condition(self, code):
         dt = self.testing_date.strftime("%Y%m%d")
-        universe_item = self.universe[code]
+        universe_item = self.universe[code]['price_df']
+
+        high = universe_item['high']
+        low = universe_item['low']
+        close = universe_item['close']
+
+        psar = talib.SAR(high, low)
 
         return True
 
@@ -345,29 +323,29 @@ class Backtesting():
         # Rate of return
         n = pnl.size
         period = (dt[n-1] - dt[0]).days
-        ror = round((pow(pnl[n - 1], 365/period) - 1) * 100, 4)
+        roi = round((pow(pnl[n - 1], 365/period) - 1) * 100, 4)
 
         # Sharpe
-        aror = []
+        aroi = []
         yrly_dt = dt[0]
         while yrly_dt < dt[n-1]:
             nxt_dt = yrly_dt + timedelta(days=365)
             i = find_nearest_idx(dt, yrly_dt)
             j = find_nearest_idx(dt, nxt_dt)
 
-            aror.append((pow(pnl[j]/pnl[i], 365/(dt[j]-dt[i]).days) - 1) * 100)
+            aroi.append((pow(pnl[j]/pnl[i], 365/(dt[j]-dt[i]).days) - 1) * 100)
 
             yrly_dt = nxt_dt
 
         sharpe = 0
-        if np.std(aror) != 0:
-            sharpe = round(np.mean(aror)/np.std(aror), 4)
+        if np.std(aroi) != 0:
+            sharpe = round(np.mean(aroi)/np.std(aroi), 4)
 
         # Turnover
         turnover = round(np.mean(traded) / np.mean(held), 4)
 
         # Returns
-        returns = round(ror / 2, 4)
+        returns = round(roi / 2, 4)
 
         # Fitness
         fitness = round(sharpe * math.sqrt(abs(returns)) / max(turnover, 0.125), 4)
@@ -377,19 +355,19 @@ class Backtesting():
         for i, p in enumerate(pnl):
             if i + 1 == pnl.size:
                 continue
-            pnl_d1.append(pnl[i] - pnl[i+1])
+            pnl_d1.append((pnl[i] - pnl[i+1]) / pnl[i])
 
         pnl_d1 = np.array(pnl_d1)
         drawdown = round(np.max(pnl_d1) * 100, 4)
 
         # Margin
-        margin = round(ror / (np.mean(traded) / self.start_deposit), 4)
+        margin = round(roi / (np.mean(traded) / self.start_deposit), 4)
 
         # matplotlib
-        r = np.power(ror / 100 + 1, np.array([x.days for x in (dt - dt[0])]) / 365)
+        r = np.power(roi / 100 + 1, np.array([x.days for x in (dt - dt[0])]) / 365)
 
         plt.figure(figsize=(15, 4))
-        txt = ('ROR: ' + str(ror) + '%' + '\n' +
+        txt = ('ROI: ' + str(roi) + '%' + '\n' +  # Goal : 15% ROI
                'Sharpe: ' + str(sharpe) + '\n' +
                'Turnover: ' + str(turnover) + '\n' +
                'Fitness: ' + str(fitness) + '\n' +
