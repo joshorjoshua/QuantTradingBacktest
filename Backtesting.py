@@ -5,7 +5,6 @@ import matplotlib.dates as mdates
 import pandas as pd
 import numpy as np
 from util.db_helper import *
-from util.const import *
 from util.time_helper import *
 from util.np_helper import *
 from datetime import *
